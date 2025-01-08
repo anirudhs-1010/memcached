@@ -417,7 +417,7 @@ static void process_update_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_resp *re
     item_remove(it);
 }
 
-static void process_arithmetic_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_resp *resp, const bool incr) {
+static void process_arithmetic_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_resp *resp, const int opcode) {
     char temp[INCR_MAX_STORAGE_LEN];
     uint64_t delta;
     const char *key = &pr->request[pr->tokens[pr->keytoken]];
@@ -435,7 +435,7 @@ static void process_arithmetic_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_resp
         return;
     }
 
-    switch(add_delta(t, key, nkey, incr, delta, temp, NULL)) {
+    switch(add_delta(t, key, nkey, opcode, delta, temp, NULL)) {
     case OK:
         pout_string(resp, temp);
         break;
@@ -447,7 +447,9 @@ static void process_arithmetic_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_resp
         break;
     case DELTA_ITEM_NOT_FOUND:
         pthread_mutex_lock(&t->stats.mutex);
-        if (incr) {
+        if (opcode == 2)
+            t->stats.mult_misses++;
+        else if (opcode == 1) {
             t->stats.incr_misses++;
         } else {
             t->stats.decr_misses++;
@@ -1421,7 +1423,7 @@ static void process_marithmetic_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_res
     // If no argument supplied, incr or decr by one.
     of.delta = 1;
     of.initial = 0; // redundant, for clarity.
-    bool incr = true; // default mode is to increment.
+    int opcode = 1; // default mode is to increment.
     bool locked = false;
     uint32_t hv = 0;
     item *it = NULL; // item returned by do_add_delta.
@@ -1453,11 +1455,11 @@ static void process_marithmetic_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_res
             break;
         case 'I': // Incr (default)
         case '+':
-            incr = true;
+            opcode = 1;
             break;
         case 'D': // Decr.
         case '-':
-            incr = false;
+            opcode = 0;
             break;
         default:
             errstr = "CLIENT_ERROR invalid mode for ma M token";
@@ -1476,7 +1478,7 @@ static void process_marithmetic_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_res
     // than adding even more parameters to do_add_delta.
     bool item_created = false;
     uint64_t cas = 0;
-    switch(do_add_delta(t, key, nkey, incr, of.delta, tmpbuf, &of.req_cas_id, hv, &it)) {
+    switch(do_add_delta(t, key, nkey, opcode, of.delta, tmpbuf, &of.req_cas_id, hv, &it)) {
     case OK:
         //if (c->noreply)
         //    resp->skip = true;
@@ -1518,7 +1520,10 @@ static void process_marithmetic_cmd(LIBEVENT_THREAD *t, mcp_parser_t *pr, mc_res
             }
         } else {
             pthread_mutex_lock(&t->stats.mutex);
-            if (incr) {
+            if (opcode == 2) {
+                t->stats.mult_misses++;
+            }
+            else if (opcode == 1) {
                 t->stats.incr_misses++;
             } else {
                 t->stats.decr_misses++;

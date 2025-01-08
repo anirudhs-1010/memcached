@@ -291,7 +291,7 @@ static void complete_incr_bin(conn *c, char *extbuf) {
     if (c->binary_header.request.cas != 0) {
         cas = c->binary_header.request.cas;
     }
-    switch(add_delta(c->thread, key, nkey, c->cmd == PROTOCOL_BINARY_CMD_INCREMENT,
+    switch(add_delta(c->thread, key, nkey, (c->cmd == PROTOCOL_BINARY_CMD_INCREMENT || c->cmd == PROTOCOL_BINARY_CMD_MULTIPLY),
                      req->message.body.delta, tmpbuf,
                      &cas)) {
     case OK:
@@ -339,7 +339,10 @@ static void complete_incr_bin(conn *c, char *extbuf) {
             }
         } else {
             pthread_mutex_lock(&c->thread->stats.mutex);
-            if (c->cmd == PROTOCOL_BINARY_CMD_INCREMENT) {
+            if (c->cmd == PROTOCOL_BINARY_CMD_MULTIPLY) {
+                c->thread->stats.mult_misses++;
+            }
+            else if (c->cmd == PROTOCOL_BINARY_CMD_INCREMENT) {
                 c->thread->stats.incr_misses++;
             } else {
                 c->thread->stats.decr_misses++;
@@ -930,6 +933,9 @@ static void dispatch_bin_command(conn *c, char *extbuf) {
         break;
     case PROTOCOL_BINARY_CMD_DECREMENTQ:
         c->cmd = PROTOCOL_BINARY_CMD_DECREMENT;
+        break;
+    case PROTOCOL_BINARY_CMD_MULTIPLYQ:
+        c->cmd = PROTOCOL_BINARY_CMD_MULTIPLY;
         break;
     case PROTOCOL_BINARY_CMD_QUITQ:
         c->cmd = PROTOCOL_BINARY_CMD_QUIT;
